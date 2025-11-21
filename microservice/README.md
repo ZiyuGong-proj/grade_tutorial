@@ -3,7 +3,7 @@
 This project processes a grade table, calculates per-student totals and maximum score differences, and demonstrates both monolithic and microservice deployments with Docker.
 
 ## Dataset
-The grade table lives in `data/grades.csv`. Each row represents a student and their scores for quizzes, assignments, and the final exam.
+The grade table lives in `data/Grade Table.csv`. Each row represents a student and their scores for quizzes, assignments, and the final exam.
 
 ## Running locally
 - **Monolithic app**: `python mono/monolithic.py` (listens on port 8000).
