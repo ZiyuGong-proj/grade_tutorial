@@ -1,9 +1,12 @@
 #!/bin/bash
 
-tmux new-session -d -s microservices "python user_service.py"
+set -e
 
-tmux split-window -h -t microservices "python order_service.py"
+# Start the data, analytics, and gateway services in a single tmux session for local testing.
+tmux new-session -d -s microservices "python data_service.py"
 
-tmux split-window -v -t microservices "python api_gateway.py"
+tmux split-window -h -t microservices "DATA_SERVICE_URL=http://localhost:5001 python analytics_service.py"
+
+tmux split-window -v -t microservices "DATA_SERVICE_URL=http://localhost:5001 ANALYTICS_SERVICE_URL=http://localhost:5002 python api_gateway.py"
 
 tmux attach-session -t microservices
