@@ -21,10 +21,10 @@ BASE_DIR = Path(__file__).resolve().parent
 
 def resolve_data_path() -> Path:
     """Locate the grade CSV regardless of whether the file is run in-place or inside a container."""
-    candidate = BASE_DIR / "data" / "grades.csv"
+    candidate = BASE_DIR / "data" / "Grade Table.csv"
     if candidate.exists():
         return candidate
-    return BASE_DIR.parent / "data" / "grades.csv"
+    return BASE_DIR.parent / "data" / "Grade Table.csv"
 
 
 def load_grades() -> List[Dict]:
@@ -39,8 +39,13 @@ def load_grades() -> List[Dict]:
     with data_path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
-            scores = {key: float(value) for key, value in row.items() if key != "student"}
-            records.append({"student": row["student"], "scores": scores})
+            student_key = next((key for key in row if key.lower() in {"student", "name"}), "student")
+            scores = {
+                key: float(value)
+                for key, value in row.items()
+                if key != student_key and value not in {None, ""}
+            }
+            records.append({"student": row[student_key], "scores": scores})
     return records
 
 
