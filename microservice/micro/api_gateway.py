@@ -1,78 +1,55 @@
-# api_gateway.py
-from flask import Flask, jsonify, request
+"""API gateway that coordinates the grade microservices."""
+from __future__ import annotations
+
+import os
+
 import requests
+from flask import Flask, jsonify
+from requests import RequestException
 
 app = Flask(__name__)
 
-# 服务注册信息
-SERVICES = {
-    'user_service': 'http://localhost:5001',
-    'order_service': 'http://localhost:5002'
-}
+DATA_SERVICE_URL = os.getenv("DATA_SERVICE_URL", "http://localhost:5001")
+ANALYTICS_SERVICE_URL = os.getenv("ANALYTICS_SERVICE_URL", "http://localhost:5002")
 
-@app.route('/health', methods=['GET'])
+
+def safe_proxy(url: str):
+    try:
+        response = requests.get(url, timeout=5)
+        return jsonify(response.json()), response.status_code
+    except RequestException as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 503
+
+
+@app.route("/health", methods=["GET"])
 def health_check():
-    # 检查所有服务的健康状态
     health_status = {}
-    for service_name, service_url in SERVICES.items():
+    for name, url in {
+        "data_service": DATA_SERVICE_URL,
+        "analytics_service": ANALYTICS_SERVICE_URL,
+    }.items():
         try:
-            response = requests.get(f'{service_url}/health', timeout=2)
-            health_status[service_name] = response.json()
-        except:
-            health_status[service_name] = {"status": "unhealthy"}
-    
+            response = requests.get(f"{url}/health", timeout=3)
+            health_status[name] = response.json()
+        except Exception as exc:  # noqa: BLE001
+            health_status[name] = {"status": "unhealthy", "error": str(exc)}
     return jsonify(health_status), 200
 
-@app.route('/users', methods=['POST'])
-def register_user():
-    """用户注册 - 路由到用户服务"""
-    try:
-        response = requests.post(
-            f"{SERVICES['user_service']}/users",
-            json=request.json,
-            timeout=5
-        )
-        return jsonify(response.json()), response.status_code
-    except requests.exceptions.RequestException:
-        return jsonify({"error": "User service unavailable"}), 503
 
-@app.route('/users/login', methods=['POST'])
-def login_user():
-    """用户登录 - 路由到用户服务"""
-    try:
-        response = requests.post(
-            f"{SERVICES['user_service']}/users/login",
-            json=request.json,
-            timeout=5
-        )
-        return jsonify(response.json()), response.status_code
-    except requests.exceptions.RequestException:
-        return jsonify({"error": "User service unavailable"}), 503
+@app.route("/grades", methods=["GET"])
+def grades():
+    return safe_proxy(f"{DATA_SERVICE_URL}/grades")
 
-@app.route('/orders', methods=['POST'])
-def create_order():
-    """创建订单 - 路由到订单服务"""
-    try:
-        response = requests.post(
-            f"{SERVICES['order_service']}/orders",
-            json=request.json,
-            timeout=5
-        )
-        return jsonify(response.json()), response.status_code
-    except requests.exceptions.RequestException:
-        return jsonify({"error": "Order service unavailable"}), 503
 
-@app.route('/users/<user_id>/orders', methods=['GET'])
-def get_user_orders(user_id):
-    """获取用户订单 - 路由到订单服务"""
-    try:
-        response = requests.get(
-            f"{SERVICES['order_service']}/orders/user/{user_id}",
-            timeout=5
-        )
-        return jsonify(response.json()), response.status_code
-    except requests.exceptions.RequestException:
-        return jsonify({"error": "Order service unavailable"}), 503
+@app.route("/metrics", methods=["GET"])
+def metrics():
+    return safe_proxy(f"{ANALYTICS_SERVICE_URL}/metrics")
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+
+@app.route("/metrics/summary", methods=["GET"])
+def metrics_summary():
+    return safe_proxy(f"{ANALYTICS_SERVICE_URL}/metrics/summary")
+
+
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)

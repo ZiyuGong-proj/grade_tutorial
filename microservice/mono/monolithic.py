@@ -1,136 +1,108 @@
-# monolithic_app.py
-from flask import Flask, jsonify, request
-import sqlite3
-import uuid
+"""Monolithic grade processing service.
+
+This service loads a grade table, computes per-student totals and score
+ranges, and exposes the results via a simple Flask API. It implements the
+"single-container" deployment path required by the assignment.
+"""
+from __future__ import annotations
+
+import csv
+from pathlib import Path
+from statistics import mean
+from typing import Dict, List
+
+from flask import Flask, jsonify
 
 app = Flask(__name__)
 
-# 初始化数据库
-def init_db():
-    conn = sqlite3.connect('ecommerce.db')
-    c = conn.cursor()
-    
-    # 创建用户表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            username TEXT UNIQUE NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
+
+BASE_DIR = Path(__file__).resolve().parent
+
+
+def resolve_data_path() -> Path:
+    """Locate the grade CSV regardless of whether the file is run in-place or inside a container."""
+    candidate = BASE_DIR / "data" / "grades.csv"
+    if candidate.exists():
+        return candidate
+    return BASE_DIR.parent / "data" / "grades.csv"
+
+
+def load_grades() -> List[Dict]:
+    """Load the grade table from CSV into a structured list.
+
+    Returns a list of entries with a student name and a mapping of their
+    scores. Numeric values are parsed as floats so that later calculations are
+    straightforward.
+    """
+    records: List[Dict] = []
+    data_path = resolve_data_path()
+    with data_path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            scores = {key: float(value) for key, value in row.items() if key != "student"}
+            records.append({"student": row["student"], "scores": scores})
+    return records
+
+
+def calculate_metrics(records: List[Dict]) -> List[Dict]:
+    """Compute total and score-range metrics for each student."""
+    results: List[Dict] = []
+    for record in records:
+        numeric_scores = list(record["scores"].values())
+        total = sum(numeric_scores)
+        score_range = max(numeric_scores) - min(numeric_scores) if numeric_scores else 0
+        results.append(
+            {
+                "student": record["student"],
+                "total": total,
+                "max_score_difference": score_range,
+            }
         )
-    ''')
-    
-    # 创建订单表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS orders (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            product_name TEXT NOT NULL,
-            quantity INTEGER NOT NULL,
-            price REAL NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
+    return results
 
-# 用户注册
-@app.route('/register', methods=['POST'])
-def register():
-    data = request.json
-    user_id = str(uuid.uuid4())
-    
-    conn = sqlite3.connect('ecommerce.db')
-    c = conn.cursor()
-    
-    try:
-        c.execute(
-            "INSERT INTO users (id, username, email, password) VALUES (?, ?, ?, ?)",
-            (user_id, data['username'], data['email'], data['password'])
-        )
-        conn.commit()
-        return jsonify({"message": "User registered successfully", "user_id": user_id}), 201
-    except sqlite3.IntegrityError:
-        return jsonify({"error": "Username or email already exists"}), 400
-    finally:
-        conn.close()
 
-# 用户登录
-@app.route('/login', methods=['POST'])
-def login():
-    data = request.json
-    
-    conn = sqlite3.connect('ecommerce.db')
-    c = conn.cursor()
-    
-    c.execute(
-        "SELECT id, username FROM users WHERE username=? AND password=?",
-        (data['username'], data['password'])
-    )
-    user = c.fetchone()
-    conn.close()
-    
-    if user:
-        return jsonify({"message": "Login successful", "user_id": user[0], "username": user[1]}), 200
-    else:
-        return jsonify({"error": "Invalid credentials"}), 401
+def summarize_metrics(metrics: List[Dict]) -> Dict:
+    """Aggregate the computed metrics into a compact statistics table."""
+    totals = [entry["total"] for entry in metrics]
+    score_ranges = [entry["max_score_difference"] for entry in metrics]
 
-# 创建订单
-@app.route('/orders', methods=['POST'])
-def create_order():
-    data = request.json
-    
-    conn = sqlite3.connect('ecommerce.db')
-    c = conn.cursor()
-    
-    # 验证用户存在
-    c.execute("SELECT id FROM users WHERE id=?", (data['user_id'],))
-    if not c.fetchone():
-        return jsonify({"error": "User not found"}), 404
-    
-    order_id = str(uuid.uuid4())
-    
-    try:
-        c.execute(
-            "INSERT INTO orders (id, user_id, product_name, quantity, price) VALUES (?, ?, ?, ?, ?)",
-            (order_id, data['user_id'], data['product_name'], data['quantity'], data['price'])
-        )
-        conn.commit()
-        return jsonify({"message": "Order created successfully", "order_id": order_id}), 201
-    finally:
-        conn.close()
+    return {
+        "total": {
+            "average": mean(totals),
+            "highest": max(totals),
+            "lowest": min(totals),
+        },
+        "max_score_difference": {
+            "average": mean(score_ranges),
+            "highest": max(score_ranges),
+            "lowest": min(score_ranges),
+        },
+    }
 
-# 获取用户订单
-@app.route('/users/<user_id>/orders', methods=['GET'])
-def get_user_orders(user_id):
-    conn = sqlite3.connect('ecommerce.db')
-    c = conn.cursor()
-    
-    # 验证用户存在
-    c.execute("SELECT username FROM users WHERE id=?", (user_id,))
-    user = c.fetchone()
-    if not user:
-        return jsonify({"error": "User not found"}), 404
-    
-    c.execute(
-        "SELECT id, product_name, quantity, price FROM orders WHERE user_id=?",
-        (user_id,)
-    )
-    orders = c.fetchall()
-    
-    order_list = []
-    for order in orders:
-        order_list.append({
-            "order_id": order[0],
-            "product_name": order[1],
-            "quantity": order[2],
-            "price": order[3]
-        })
-    
-    conn.close()
-    return jsonify({"username": user[0], "orders": order_list}), 200
 
-if __name__ == '__main__':
-    init_db()
-    app.run(debug=True, host='0.0.0.0', port=5000)
+@app.route("/health", methods=["GET"])
+def health_check():
+    return jsonify({"status": "healthy", "service": "monolithic"}), 200
+
+
+@app.route("/grades", methods=["GET"])
+def get_grades():
+    return jsonify(load_grades()), 200
+
+
+@app.route("/metrics", methods=["GET"])
+def get_metrics():
+    records = load_grades()
+    metrics = calculate_metrics(records)
+    return jsonify(metrics), 200
+
+
+@app.route("/metrics/summary", methods=["GET"])
+def get_summary():
+    records = load_grades()
+    metrics = calculate_metrics(records)
+    return jsonify(summarize_metrics(metrics)), 200
+
+
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=8000)

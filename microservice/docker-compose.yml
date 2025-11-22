@@ -1,0 +1,40 @@
+version: '3.9'
+
+services:
+  monolithic:
+    build:
+      context: .
+      dockerfile: Dockerfile.monolithic
+    ports:
+      - "8000:8000"
+
+  data_service:
+    build:
+      context: .
+      dockerfile: Dockerfile.data_service
+    ports:
+      - "5001:5001"
+
+  analytics_service:
+    build:
+      context: .
+      dockerfile: Dockerfile.analytics_service
+    environment:
+      - DATA_SERVICE_URL=http://data_service:5001
+    depends_on:
+      - data_service
+    ports:
+      - "5002:5002"
+
+  api_gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.api_gateway
+    environment:
+      - DATA_SERVICE_URL=http://data_service:5001
+      - ANALYTICS_SERVICE_URL=http://analytics_service:5002
+    depends_on:
+      - data_service
+      - analytics_service
+    ports:
+      - "5000:5000"

@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+ENV DATA_SERVICE_URL=http://data_service:5001
+
+COPY micro/analytics_service.py ./analytics_service.py
+
+EXPOSE 5002
+CMD ["python", "analytics_service.py"]
